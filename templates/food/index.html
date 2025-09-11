@@ -1,0 +1,44 @@
+{% extends 'food/base.html' %}
+{% block title %}Manage Groceries{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Manage Groceries</h2>
+
+<div class="d-flex mb-3">
+    <input type="search" class="form-control me-2" placeholder="Search groceries..." id="searchInput">
+    <button class="btn btn-outline-primary me-2">Search</button>
+    <a href="{% url 'add' %}" class="btn btn-primary">Add Grocery</a>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-hover align-middle">
+        <thead class="table-primary">
+            <tr>
+                <th>Name</th>
+                <th>Expiry Date</th>
+                <th>Quantity</th>
+                <th>Category</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for grocery in groceries %}
+            <tr>
+                <td>{{ grocery.grocery_name }}</td>
+                <td>{{ grocery.ex_date }}</td>
+                <td>{{ grocery.quantity }}</td>
+                <td>{{ grocery.grocerie_type.type_name }}</td>
+                <td>
+                    <a href="{% url 'edit' grocery.id %}" class="btn btn-sm btn-warning">Edit</a>
+                    <a href="{% url 'delete' grocery.id %}" class="btn btn-sm btn-danger">Delete</a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" class="text-center">No groceries found.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

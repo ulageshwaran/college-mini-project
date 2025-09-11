@@ -1,0 +1,144 @@
+{% extends "food/base.html" %}
+{% block content %}
+<div class="container my-5">
+
+  <!-- Page Header -->
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Manage Inventory</h2>
+    <a href="{% url 'add' %}" class="btn btn-primary">
+      <i class="bi bi-plus-circle"></i> Add Item
+    </a>
+  </div>
+
+  <!-- Search Bar -->
+  <div class="input-group mb-4">
+    <input type="text" class="form-control" id="searchInput" placeholder="Search for items...">
+    <span class="input-group-text"><i class="bi bi-search"></i></span>
+  </div>
+
+  <!-- Inventory Table -->
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Name</th>
+              <th>Quantity</th>
+              <th>Category</th>
+              <th>Expiry Date</th>
+              <th>Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="inventoryTable">
+            {% for item in items %}
+            <tr>
+              <td>{{ item.name }}</td>
+              <td>{{ item.quantity }}</td>
+              <td>{{ item.category }}</td>
+              <td>{{ item.expiry_date }}</td>
+              <td>
+                {% if item.is_expired %}
+                  <span class="badge bg-danger">Expired</span>
+                {% elif item.is_expiring_soon %}
+                  <span class="badge bg-warning text-dark">Expiring Soon</span>
+                {% else %}
+                  <span class="badge bg-success">Good</span>
+                {% endif %}
+              </td>
+              <td class="text-end">
+                <!-- Edit Button -->
+                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal{{ item.id }}">
+                  <i class="bi bi-pencil-square"></i>
+                </button>
+                <!-- Delete Button -->
+                <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteModal{{ item.id }}">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </td>
+            </tr>
+
+            <!-- Edit Modal -->
+            <div class="modal fade" id="editModal{{ item.id }}" tabindex="-1" aria-hidden="true">
+              <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                  <form method="post" action="{% url 'edit_item' item.id %}">
+                    {% csrf_token %}
+                    <div class="modal-header">
+                      <h5 class="modal-title">Edit {{ item.name }}</h5>
+                      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                      <div class="mb-3">
+                        <label class="form-label">Name</label>
+                        <input type="text" class="form-control" name="name" value="{{ item.name }}">
+                      </div>
+                      <div class="mb-3">
+                        <label class="form-label">Quantity</label>
+                        <input type="number" class="form-control" name="quantity" value="{{ item.quantity }}">
+                      </div>
+                      <div class="mb-3">
+                        <label class="form-label">Category</label>
+                        <input type="text" class="form-control" name="category" value="{{ item.category }}">
+                      </div>
+                      <div class="mb-3">
+                        <label class="form-label">Expiry Date</label>
+                        <input type="date" class="form-control" name="expiry_date" value="{{ item.expiry_date|date:'Y-m-d' }}">
+                      </div>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                      <button type="submit" class="btn btn-primary">Save Changes</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+
+            <!-- Delete Modal -->
+            <div class="modal fade" id="deleteModal{{ item.id }}" tabindex="-1" aria-hidden="true">
+              <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                  <form method="post" action="{% url 'delete_item' item.id %}">
+                    {% csrf_token %}
+                    <div class="modal-header">
+                      <h5 class="modal-title">Delete {{ item.name }}</h5>
+                      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                      <p>Are you sure you want to delete <strong>{{ item.name }}</strong>?</p>
+                    </div>
+                    <div class="modal-footer">
+                      <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                      <button type="submit" class="btn btn-danger">Delete</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </div>
+
+            {% empty %}
+            <tr>
+              <td colspan="6" class="text-center text-muted">No items found.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Simple search filter
+  document.getElementById("searchInput").addEventListener("keyup", function() {
+    let filter = this.value.toLowerCase();
+    let rows = document.querySelectorAll("#inventoryTable tr");
+    rows.forEach(row => {
+      let text = row.innerText.toLowerCase();
+      row.style.display = text.includes(filter) ? "" : "none";
+    });
+  });
+</script>
+{% endblock %}

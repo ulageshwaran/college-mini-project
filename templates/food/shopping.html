@@ -1,0 +1,100 @@
+{% extends 'food/base.html' %}
+{% block title %}Shopping List{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Shopping List</h2>
+
+<div class="row mb-3">
+    <div class="col-md-6">
+        <input type="search" class="form-control" placeholder="Search groceries..." id="searchInput">
+    </div>
+</div>
+
+<div class="row">
+    <!-- Available groceries -->
+    <div class="col-md-6 mb-4">
+        <h5>Available Groceries</h5>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-secondary">
+                    <tr>
+                        <th>Name</th>
+                        <th>Quantity</th>
+                        <th>Category</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for grocery in groceries %}
+                    <tr>
+                        <td>{{ grocery.grocery_name }}</td>
+                        <td>{{ grocery.quantity }}</td>
+                        <td>{{ grocery.grocerie_type.type_name }}</td>
+                        <td>
+                            <button class="btn btn-sm btn-success add-btn" data-id="{{ grocery.id }}">Add</button>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-center">No groceries available.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Shopping list -->
+    <div class="col-md-6 mb-4">
+        <h5>Your Shopping List</h5>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle" id="shoppingListTable">
+                <thead class="table-primary">
+                    <tr>
+                        <th>Name</th>
+                        <th>Quantity</th>
+                        <th>Category</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Dynamically added rows go here -->
+                </tbody>
+            </table>
+        </div>
+        <button id="printButton" class="btn btn-secondary mt-2">Print Shopping List</button>
+    </div>
+</div>
+
+<script>
+    document.querySelectorAll('.add-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const row = this.closest('tr');
+            const name = row.children[0].textContent;
+            const qty = row.children[1].textContent;
+            const category = row.children[2].textContent;
+
+            const newRow = document.createElement('tr');
+            newRow.innerHTML = `
+                <td>${name}</td>
+                <td><input type="number" class="form-control quantity-input" value="${qty}" /></td>
+                <td>${category}</td>
+                <td><button class="btn btn-sm btn-danger delete-btn">Delete</button></td>
+            `;
+            document.querySelector('#shoppingListTable tbody').appendChild(newRow);
+
+            newRow.querySelector('.delete-btn').addEventListener('click', () => newRow.remove());
+        });
+    });
+
+    document.getElementById('printButton').addEventListener('click', () => {
+        const printContents = document.getElementById('shoppingListTable').outerHTML;
+        const heading = `<h2 class="text-center">Shopping List</h2>`;
+        const original = document.body.innerHTML;
+        document.body.innerHTML = heading + printContents;
+        window.print();
+        document.body.innerHTML = original;
+        location.reload();
+    });
+</script>
+{% endblock %}
