@@ -62,8 +62,9 @@ SESSION_ENGINE = 'django.contrib.sessions.backends.file'
 SESSION_FILE_PATH = '/tmp/django_sessions' 
 SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
 
-LOGIN_URL = '/signin/'  
-LOGIN_REDIRECT_URL = '/' 
+LOGIN_URL = 'signin'
+LOGIN_REDIRECT_URL = 'index'
+LOGOUT_REDIRECT_URL = 'signin'
 
 TEMPLATES = [
     {

@@ -1,5 +1,6 @@
 from django.contrib.auth.models import User
 from django.db import models
+from datetime import date, timedelta
 
 # Grocery Categories
 class GroceryType(models.Model):
@@ -22,6 +23,13 @@ class Grocery(models.Model):
     class Meta:
         db_table = 'food_groceries'  # matches existing table
 
+    @property
+    def is_expired(self):
+        return self.ex_date < date.today()
+
+    @property
+    def is_expiring_soon(self):
+        return date.today() <= self.ex_date <= date.today() + timedelta(days=7)
     def __str__(self):
         return self.grocery_name
 
