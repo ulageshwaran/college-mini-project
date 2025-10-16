@@ -251,6 +251,37 @@ def suggest_recipes(request):
     })
 
 @login_required
+def view_saved_recipes(request):
+    """View all saved recipes"""
+    recipes = Receipe.objects.all().prefetch_related('receipe_ingredients_set__ingredient')
+    
+    return render(request, 'food/saved_recipes.html', {
+        'recipes': recipes
+    })
+
+@login_required
+def view_recipe_detail(request, pk):
+    """View a single recipe in detail"""
+    recipe = get_object_or_404(Receipe, pk=pk)
+    ingredients = recipe.receipe_ingredients_set.all()
+    
+    return render(request, 'food/recipe_detail.html', {
+        'recipe': recipe,
+        'ingredients': ingredients
+    })
+
+@login_required
+def delete_recipe_view(request, pk):
+    """Delete a saved recipe"""
+    recipe = get_object_or_404(Receipe, pk=pk)
+    
+    if request.method == 'POST':
+        recipe.delete()
+        return JsonResponse({'status': 'success'})
+    
+    return JsonResponse({'error': 'Invalid request'}, status=400)
+
+@login_required
 def save_recipe(request):
     """Save generated recipe to database"""
     if request.method == 'POST':

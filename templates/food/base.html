@@ -36,6 +36,14 @@
     {% endif %}
 
     <!-- MESSAGE ALERTS -->
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show m-2" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
 
     <!-- Navbar -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
@@ -49,6 +57,9 @@
                     <li class="nav-item"><a class="nav-link" href="{% url 'shopping' %}">Shopping List</a></li>
                     <li class="nav-item"><a class="nav-link" href="{% url 'suggest_recipes' %}">
                         <i class="bi bi-robot"></i> AI Recipes
+                    </a></li>
+                    <li class="nav-item"><a class="nav-link" href="{% url 'view_saved_recipes' %}">
+                        <i class="bi bi-bookmark"></i> Saved Recipes
                     </a></li>
                     <li class="nav-item"><a class="nav-link" href="{% url 'index' %}">Manage Groceries</a></li>
                 </ul>

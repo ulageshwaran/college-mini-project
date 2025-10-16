@@ -1,7 +1,9 @@
 {% extends 'food/base.html' %}
 {% block title %}AI Recipe Suggestions{% endblock %}
 
+
 {% block content %}
+{% csrf_token %}
 <style>
     .recipe-header {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -204,9 +206,14 @@
         color: white;
     }
 
-    .btn-save-recipe:hover {
+    .btn-save-recipe:hover:not(:disabled) {
         background-color: #38a169;
         transform: translateY(-2px);
+    }
+
+    .btn-save-recipe:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
     }
 
     .bottom-actions {
@@ -381,6 +388,18 @@
         return recipes;
     }
 
+    // Helper function to escape HTML in data attributes
+    function escapeHtml(text) {
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return text.replace(/[&<>"']/g, m => map[m]);
+    }
+
     // Render recipes to UI
     function renderRecipes(recipes) {
         const grid = document.getElementById('recipes-grid');
@@ -389,16 +408,20 @@
         recipes.forEach((recipe, idx) => {
             const card = document.createElement('div');
             card.className = 'recipe-card';
+            
+            const escapedName = escapeHtml(recipe.name);
+            const escapedContent = escapeHtml(recipe.content);
+            
             card.innerHTML = `
                 <div class="recipe-card-header">
-                    <h3><i class="bi bi-fire"></i> ${recipe.name}</h3>
+                    <h3><i class="bi bi-fire"></i> ${escapedName}</h3>
                 </div>
                 <div class="recipe-card-body">
                     <div class="recipe-content" id="recipe-content-${idx}">
                         <!-- Content will be formatted below -->
                     </div>
                     <div class="recipe-actions">
-                        <button class="btn-save-recipe" onclick="saveIndividualRecipe('${recipe.name.replace(/'/g, "\\'")}', '${recipe.content.replace(/'/g, "\\'")}')">
+                        <button class="btn-save-recipe" data-recipe-idx="${idx}">
                             <i class="bi bi-bookmark"></i> Save This Recipe
                         </button>
                     </div>
@@ -408,6 +431,11 @@
             
             // Format and display recipe content
             formatRecipeContent(recipe.content, `recipe-content-${idx}`);
+            
+            // Add event listener to save button
+            card.querySelector('.btn-save-recipe').addEventListener('click', function() {
+                saveRecipeFromCard(recipe.name, recipe.content, this);
+            });
         });
     }
 
@@ -509,8 +537,12 @@
         container.innerHTML = html;
     }
 
-    // Save individual recipe
-    async function saveIndividualRecipe(name, content) {
+    // Save recipe from card - FIXED VERSION
+    async function saveRecipeFromCard(name, content, button) {
+        button.disabled = true;
+        const originalHTML = button.innerHTML;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
+        
         try {
             const response = await fetch('{% url "save_recipe" %}', {
                 method: 'POST',
@@ -527,12 +559,22 @@
 
             const data = await response.json();
             if (data.status === 'success') {
-                alert(`✓ "${name}" saved successfully!`);
+                button.innerHTML = '<i class="bi bi-check-circle"></i> Saved!';
+                button.style.backgroundColor = '#48bb78';
+                button.disabled = false;
+                setTimeout(() => {
+                    alert('Recipe saved successfully!');
+                }, 500);
             } else {
                 alert('Error: ' + data.message);
+                button.disabled = false;
+                button.innerHTML = originalHTML;
             }
         } catch (error) {
-            alert('Error saving recipe: ' + error);
+            console.error('Save error:', error);
+            alert('Error saving recipe: ' + error.message);
+            button.disabled = false;
+            button.innerHTML = originalHTML;
         }
     }
 
@@ -570,6 +612,7 @@
                 parsedRecipes = parseRecipes(data.recipe);
                 renderRecipes(parsedRecipes);
                 bootstrap.Modal.getInstance(document.getElementById('refineModal')).hide();
+                document.getElementById('preferencesInput').value = '';
                 alert('Recipes refined successfully!');
             } else {
                 alert('Error: ' + data.message);
