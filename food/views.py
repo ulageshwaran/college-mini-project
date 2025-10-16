@@ -90,7 +90,13 @@ def get_ai_recipe_suggestion(ingredients_list, preferences=""):
     """
     Free AI recipe generation using Google Gemini API
     
-    Using: gemini-2.5-flash (Fast, efficient, and stable)
+    Get free API key at: https://ai.google.dev/
+    
+    Gemini Free Tier:
+    - 60 requests per minute
+    - No credit card required
+    - Excellent quality responses
+    - Perfect for recipe generation
     """
     
     try:
@@ -99,8 +105,9 @@ def get_ai_recipe_suggestion(ingredients_list, preferences=""):
         if not api_key:
             return None, "Gemini API key not configured. Please set GEMINI_API_KEY environment variable."
         
-        # Use gemini-2.5-flash model
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        # Gemini API endpoint - use latest model
+        # Using gemini-2.5-flash (fastest, free tier)
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
         
         ingredients_str = ', '.join(ingredients_list)
         
@@ -129,8 +136,9 @@ Keep recipes practical and suitable for home cooking."""
                 }
             ],
             "generationConfig": {
-                "temperature": 0.7,
-                "maxOutputTokens": 2048,
+                "temperature": 0.5,
+                "maxOutputTokens": 4096,
+                "topP": 0.9,
             }
         }
         
@@ -140,53 +148,58 @@ Keep recipes practical and suitable for home cooking."""
         
         response = requests.post(url, json=payload, headers=headers, timeout=30)
         
-        # Debug: Print response status and content
-        print(f"Response Status: {response.status_code}")
-        
         if response.status_code == 200:
             data = response.json()
             
-            # Debug: Print the response structure
-            print(f"Response Data Keys: {data.keys()}")
+            # Debug: Print response structure
+            print(f"API Response: {data}")
             
-            # Extract text with better error handling
-            try:
-                if 'candidates' in data and len(data['candidates']) > 0:
-                    candidate = data['candidates'][0]
-                    
-                    # Check if content exists
-                    if 'content' in candidate:
-                        content = candidate['content']
+            # Extract text from Gemini response - with better error handling
+            if 'candidates' in data and len(data['candidates']) > 0:
+                candidate = data['candidates'][0]
+                
+                # Check if content exists and has parts
+                if 'content' in candidate and 'parts' in candidate['content']:
+                    content = candidate['content']
+                    if len(content['parts']) > 0:
+                        recipe_text = content['parts'][0].get('text', '')
                         
-                        # Check if parts exist
-                        if 'parts' in content and len(content['parts']) > 0:
-                            recipe_text = content['parts'][0]['text']
+                        if recipe_text:
                             return recipe_text, None
                         else:
-                            print(f"No parts found. Content structure: {content}")
-                            return None, "Invalid response structure: no parts found"
+                            # Check if API hit token limit
+                            finish_reason = candidate.get('finishReason', '')
+                            if finish_reason == 'MAX_TOKENS':
+                                return None, "API response was cut off. Increase token limit or simplify request."
+                            return None, "API returned empty text"
                     else:
-                        print(f"No content found. Candidate structure: {candidate}")
-                        return None, "Invalid response structure: no content found"
+                        return None, "No parts in content"
                 else:
-                    print(f"No candidates found. Response: {data}")
-                    return None, "No response from API"
-            except KeyError as e:
-                print(f"KeyError: {e}")
-                print(f"Full response: {json.dumps(data, indent=2)}")
-                return None, f"Response parsing error: {str(e)}"
+                    # Handle case where content exists but has no parts (MAX_TOKENS hit)
+                    finish_reason = candidate.get('finishReason', '')
+                    if finish_reason == 'MAX_TOKENS':
+                        return None, "Response cut off (token limit reached). Please try again."
+                    return None, "Invalid response structure: no content field"
+            else:
+                return None, "No candidates in response"
         else:
-            # Detailed error logging
-            error_data = response.json()
-            error_msg = error_data.get('error', {}).get('message', 'Unknown error')
-            print(f"API Error: {error_msg}")
-            print(f"Full error response: {error_data}")
+            # Handle error responses
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('error', {}).get('message', f'HTTP {response.status_code}')
+                print(f"API Error Response: {error_data}")
+            except:
+                error_msg = f'HTTP {response.status_code}: {response.text}'
+            
             return None, f"API Error: {error_msg}"
             
     except requests.Timeout:
-        return None, "Request timeout. Please try again."
+        return None, "Request timeout. The API took too long to respond. Please try again."
+    except requests.ConnectionError:
+        return None, "Connection error. Please check your internet connection."
+    except json.JSONDecodeError:
+        return None, "Invalid API response format."
     except Exception as e:
-        print(f"Exception occurred: {type(e).__name__}: {str(e)}")
         import traceback
         traceback.print_exc()
         return None, f"Error generating recipes: {str(e)}"
@@ -276,74 +289,100 @@ def save_recipe(request):
     return JsonResponse({'error': 'Invalid request'}, status=400)
 
 @login_required
-def refine_recipe_api(current_recipe, preferences):
-    """
-    Fixed refine recipe function using gemini-2.5-flash
-    """
-    try:
-        api_key = os.environ.get('GEMINI_API_KEY')
-        if not api_key:
-            return None, "API not configured"
-        
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-        
-        prompt = f"""Modify this recipe based on the following preferences: {preferences}
+def refine_recipe(request):
+    """Refine recipe based on user preferences"""
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            current_recipe = data.get('recipe', '')
+            preferences = data.get('preferences', '')
+            
+            if not preferences:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'Please specify preferences'
+                }, status=400)
+            
+            api_key = os.environ.get('GEMINI_API_KEY')
+            if not api_key:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'API not configured'
+                }, status=400)
+            
+            # Use same API endpoint as recipe generation
+            url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
+            
+            prompt = f"""Modify this recipe based on the following preferences: {preferences}
 
 Current Recipe:
 {current_recipe}
 
 Provide the modified recipe with the same format as before."""
-        
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": prompt
-                        }
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.7,
-                "maxOutputTokens": 1024,
-            }
-        }
-        
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            data = response.json()
             
-            # Better error handling
-            try:
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": prompt
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.5,
+                    "maxOutputTokens": 4096,
+                    "topP": 0.9,
+                }
+            }
+            
+            headers = {
+                "Content-Type": "application/json"
+            }
+            
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
                 if 'candidates' in data and len(data['candidates']) > 0:
                     candidate = data['candidates'][0]
-                    
                     if 'content' in candidate and 'parts' in candidate['content']:
                         refined_recipe = candidate['content']['parts'][0]['text']
-                        return refined_recipe, None
+                        return JsonResponse({
+                            'status': 'success',
+                            'recipe': refined_recipe
+                        })
                     else:
-                        return None, "Invalid response structure"
+                        finish_reason = candidate.get('finishReason', '')
+                        if finish_reason == 'MAX_TOKENS':
+                            return JsonResponse({
+                                'status': 'error',
+                                'message': 'Response was cut off. Please try again.'
+                            }, status=400)
+                        return JsonResponse({
+                            'status': 'error',
+                            'message': 'No response from API'
+                        }, status=400)
                 else:
-                    return None, "No response from API"
-            except (KeyError, IndexError) as e:
-                print(f"Parse error: {e}")
-                print(f"Response: {json.dumps(data, indent=2)}")
-                return None, f"Response parsing error: {str(e)}"
-        else:
-            error_msg = response.json().get('error', {}).get('message', 'Unknown error')
-            return None, f"API Error: {error_msg}"
-            
-    except Exception as e:
-        print(f"Exception in refine_recipe_api: {e}")
-        import traceback
-        traceback.print_exc()
-        return None, f"Error: {str(e)}"
+                    return JsonResponse({
+                        'status': 'error',
+                        'message': 'No response from API'
+                    }, status=400)
+            else:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': 'Failed to refine recipe'
+                }, status=400)
+                
+        except Exception as e:
+            return JsonResponse({
+                'status': 'error',
+                'message': str(e)
+            }, status=400)
+    
+    return JsonResponse({'error': 'Invalid request'}, status=400)
+
 # ============================================
 # EXISTING FUNCTIONS (Keep as is)
 # ============================================

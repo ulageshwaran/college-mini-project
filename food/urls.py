@@ -15,5 +15,5 @@ urlpatterns = [
     # New recipe AI routes
     path('recipes/suggest/', views.suggest_recipes, name='suggest_recipes'),
     path('recipes/save/', views.save_recipe, name='save_recipe'),
-    path('recipes/refine/', views.refine_recipe_api, name='refine_recipe_api'),
+    path('recipes/refine/', views.refine_recipe, name='refine_recipe'),
 ]
