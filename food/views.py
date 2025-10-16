@@ -1,13 +1,58 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
-from .models import Grocery, GroceryType, ShoppingList
+from .models import Grocery, GroceryType, ShoppingList, Receipe, Receipe_Ingredients, Ingredient
 from .forms import GroceryForm, ShoppingListForm
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
+from datetime import date, timedelta
+from django.http import JsonResponse
+import json
+import requests
+import os
 
-# Home / Index - List all groceries with search
+# ============================================
+# EXPIRY WARNING SYSTEM
+# ============================================
+
+def get_expiry_warnings(user):
+    """
+    Get expiry status for all user groceries
+    Returns: dict with expired and expiring_soon items
+    """
+    today = date.today()
+    
+    expired = Grocery.objects.filter(
+        user=user,
+        ex_date__lt=today
+    ).select_related('grocerie_type')
+    
+    expiring_soon = Grocery.objects.filter(
+        user=user,
+        ex_date__gte=today,
+        ex_date__lte=today + timedelta(days=7)
+    ).select_related('grocerie_type')
+    
+    return {
+        'expired': expired,
+        'expiring_soon': expiring_soon,
+        'expired_count': expired.count(),
+        'expiring_soon_count': expiring_soon.count()
+    }
+
+# Context processor to add warnings to every page
+def add_expiry_warnings(request):
+    """Add to context_processors in settings.py"""
+    if request.user.is_authenticated:
+        warnings = get_expiry_warnings(request.user)
+        return {'expiry_warnings': warnings}
+    return {}
+
+# ============================================
+# HOME / INDEX - WITH EXPIRY WARNINGS
+# ============================================
+
 @login_required
 def index(request):
     search_query = request.GET.get('search', '').strip()
@@ -15,18 +60,294 @@ def index(request):
     
     if search_query:
         groceries = groceries.filter(
-            Q(grocery_name__icontains=search_query) |
+            Q(grocery_name__icontains=search_query) |   
             Q(grocerie_type__type_name__icontains=search_query)
         )
     
-    groceries = groceries.order_by('-ex_date')
+    groceries = groceries.order_by('ex_date')
+    
+    # Get expiry warnings
+    warnings = get_expiry_warnings(request.user)
+    
+    # Add warning messages
+    if warnings['expired_count'] > 0:
+        messages.error(request, f"⚠️ {warnings['expired_count']} item(s) have expired!")
+    
+    if warnings['expiring_soon_count'] > 0:
+        messages.warning(request, f"⏰ {warnings['expiring_soon_count']} item(s) expiring within 7 days!")
     
     return render(request, 'food/index.html', {
         'groceries': groceries,
-        'search_query': search_query
+        'search_query': search_query,
+        'warnings': warnings
     })
 
-# Add a new grocery
+# ============================================
+# GOOGLE GEMINI API RECIPE GENERATION
+# ============================================
+
+def get_ai_recipe_suggestion(ingredients_list, preferences=""):
+    """
+    Free AI recipe generation using Google Gemini API
+    
+    Using: gemini-2.5-flash (Fast, efficient, and stable)
+    """
+    
+    try:
+        # Get API key from environment variable
+        api_key = os.environ.get('GEMINI_API_KEY')
+        if not api_key:
+            return None, "Gemini API key not configured. Please set GEMINI_API_KEY environment variable."
+        
+        # Use gemini-2.5-flash model
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        
+        ingredients_str = ', '.join(ingredients_list)
+        
+        prompt = f"""Generate 3 creative, easy-to-make recipes that use as many of these ingredients as possible:
+
+Ingredients: {ingredients_str}
+{f'Preferences: {preferences}' if preferences else ''}
+
+For each recipe, provide:
+1. Recipe name
+2. Ingredients (with quantities from available items)
+3. Step-by-step instructions (5-8 steps)
+4. Cooking time
+5. Difficulty level (Easy/Medium/Hard)
+
+Keep recipes practical and suitable for home cooking."""
+
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": prompt
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.7,
+                "maxOutputTokens": 2048,
+            }
+        }
+        
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        
+        # Debug: Print response status and content
+        print(f"Response Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Debug: Print the response structure
+            print(f"Response Data Keys: {data.keys()}")
+            
+            # Extract text with better error handling
+            try:
+                if 'candidates' in data and len(data['candidates']) > 0:
+                    candidate = data['candidates'][0]
+                    
+                    # Check if content exists
+                    if 'content' in candidate:
+                        content = candidate['content']
+                        
+                        # Check if parts exist
+                        if 'parts' in content and len(content['parts']) > 0:
+                            recipe_text = content['parts'][0]['text']
+                            return recipe_text, None
+                        else:
+                            print(f"No parts found. Content structure: {content}")
+                            return None, "Invalid response structure: no parts found"
+                    else:
+                        print(f"No content found. Candidate structure: {candidate}")
+                        return None, "Invalid response structure: no content found"
+                else:
+                    print(f"No candidates found. Response: {data}")
+                    return None, "No response from API"
+            except KeyError as e:
+                print(f"KeyError: {e}")
+                print(f"Full response: {json.dumps(data, indent=2)}")
+                return None, f"Response parsing error: {str(e)}"
+        else:
+            # Detailed error logging
+            error_data = response.json()
+            error_msg = error_data.get('error', {}).get('message', 'Unknown error')
+            print(f"API Error: {error_msg}")
+            print(f"Full error response: {error_data}")
+            return None, f"API Error: {error_msg}"
+            
+    except requests.Timeout:
+        return None, "Request timeout. Please try again."
+    except Exception as e:
+        print(f"Exception occurred: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None, f"Error generating recipes: {str(e)}"
+
+# ============================================
+# RECIPE SUGGESTION WITH EXPIRY WARNINGS
+# ============================================
+
+@login_required
+def suggest_recipes(request):
+    """Get AI-suggested recipes based on soon-expiring ingredients"""
+    user = request.user
+    today = date.today()
+    
+    # Get items expiring within 7 days
+    expiring_soon = Grocery.objects.filter(
+        user=user,
+        ex_date__lte=today + timedelta(days=7),
+        ex_date__gte=today
+    ).select_related('grocerie_type').order_by('ex_date')
+    
+    if not expiring_soon.exists():
+        messages.info(request, "No ingredients expiring soon! Your fridge is in good shape.")
+        return redirect('index')
+    
+    # Extract ingredient info
+    ingredients = [g.grocery_name for g in expiring_soon]
+    expiry_info = [(g.grocery_name, g.ex_date) for g in expiring_soon]
+    
+    # Get preferences from request if provided
+    preferences = request.GET.get('preferences', '')
+    
+    # Generate recipes using Gemini API
+    recipes_text, error = get_ai_recipe_suggestion(ingredients, preferences)
+    
+    if error:
+        messages.error(request, f"Could not generate recipes: {error}")
+        return redirect('index')
+    
+    if not recipes_text:
+        messages.error(request, "Failed to generate recipes. Please try again.")
+        return redirect('index')
+    
+    return render(request, 'food/recipes_suggestion.html', {
+        'recipes': recipes_text,
+        'expiring_items': expiring_soon,
+        'expiry_info': expiry_info,
+        'ingredients_list': ingredients
+    })
+
+@login_required
+def save_recipe(request):
+    """Save generated recipe to database"""
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            
+            recipe = Receipe.objects.create(
+                name=data.get('recipe_name', 'Unnamed Recipe'),
+                description=data.get('instructions', '')
+            )
+            
+            # Save ingredients
+            ingredients_dict = data.get('ingredients', {})
+            for ingredient_name in ingredients_dict.keys():
+                ingredient, _ = Ingredient.objects.get_or_create(
+                    name=ingredient_name
+                )
+                Receipe_Ingredients.objects.create(
+                    receipe=recipe,
+                    ingredient=ingredient,
+                    quantity=1,
+                    unit='as needed'
+                )
+            
+            return JsonResponse({
+                'status': 'success',
+                'message': f'Recipe "{recipe.name}" saved successfully!',
+                'recipe_id': recipe.id
+            })
+        except Exception as e:
+            return JsonResponse({
+                'status': 'error',
+                'message': str(e)
+            }, status=400)
+    
+    return JsonResponse({'error': 'Invalid request'}, status=400)
+
+@login_required
+def refine_recipe_api(current_recipe, preferences):
+    """
+    Fixed refine recipe function using gemini-2.5-flash
+    """
+    try:
+        api_key = os.environ.get('GEMINI_API_KEY')
+        if not api_key:
+            return None, "API not configured"
+        
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+        
+        prompt = f"""Modify this recipe based on the following preferences: {preferences}
+
+Current Recipe:
+{current_recipe}
+
+Provide the modified recipe with the same format as before."""
+        
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": prompt
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.7,
+                "maxOutputTokens": 1024,
+            }
+        }
+        
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Better error handling
+            try:
+                if 'candidates' in data and len(data['candidates']) > 0:
+                    candidate = data['candidates'][0]
+                    
+                    if 'content' in candidate and 'parts' in candidate['content']:
+                        refined_recipe = candidate['content']['parts'][0]['text']
+                        return refined_recipe, None
+                    else:
+                        return None, "Invalid response structure"
+                else:
+                    return None, "No response from API"
+            except (KeyError, IndexError) as e:
+                print(f"Parse error: {e}")
+                print(f"Response: {json.dumps(data, indent=2)}")
+                return None, f"Response parsing error: {str(e)}"
+        else:
+            error_msg = response.json().get('error', {}).get('message', 'Unknown error')
+            return None, f"API Error: {error_msg}"
+            
+    except Exception as e:
+        print(f"Exception in refine_recipe_api: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, f"Error: {str(e)}"
+# ============================================
+# EXISTING FUNCTIONS (Keep as is)
+# ============================================
+
 @login_required
 def add_grocery(request):
     grocery_types = GroceryType.objects.all()
@@ -56,7 +377,6 @@ def add_grocery(request):
         'is_editing': False
     })
 
-# Edit an existing grocery
 @login_required
 def edit_grocery(request, pk):
     grocery = get_object_or_404(Grocery, pk=pk, user=request.user)
@@ -80,7 +400,6 @@ def edit_grocery(request, pk):
         except Exception as e:
             messages.error(request, f'Error updating grocery: {str(e)}')
     
-    # Create a form-like object for template
     form_data = {
         'grocery_name': {'value': grocery.grocery_name},
         'ex_date': {'value': grocery.ex_date.strftime('%Y-%m-%d')},
@@ -94,7 +413,6 @@ def edit_grocery(request, pk):
         'is_editing': True
     })
 
-# Delete a grocery
 @login_required
 def delete_grocery(request, pk):
     grocery = get_object_or_404(Grocery, pk=pk, user=request.user)
@@ -102,11 +420,9 @@ def delete_grocery(request, pk):
     messages.success(request, 'Grocery deleted successfully!')
     return redirect('index')
 
-# Shopping List - View current shopping list with search
 @login_required
 def shopping_list(request):
     search_query = request.GET.get('search', '').strip()
-    
     shop_list = ShoppingList.objects.filter(user=request.user).select_related('grocery', 'grocery__grocerie_type')
     groceries = Grocery.objects.filter(user=request.user).select_related('grocerie_type')
     
@@ -124,7 +440,6 @@ def shopping_list(request):
         'search_query': search_query
     })
 
-# Add grocery to shopping list
 @login_required
 def add_to_shopping_list(request, pk):
     grocery = get_object_or_404(Grocery, pk=pk, user=request.user)
@@ -139,7 +454,6 @@ def add_to_shopping_list(request, pk):
     messages.success(request, f'{grocery.grocery_name} added to your shopping list!')
     return redirect('shopping')
 
-# Remove grocery from shopping list
 @login_required
 def remove_from_shopping_list(request, pk):
     shop_item = get_object_or_404(ShoppingList, pk=pk, user=request.user)
@@ -147,7 +461,6 @@ def remove_from_shopping_list(request, pk):
     messages.success(request, 'Item removed from shopping list!')
     return redirect('shopping')
 
-# Signin view
 def signin_view(request):
     if request.user.is_authenticated:
         return redirect('index')
@@ -178,7 +491,6 @@ def signin_view(request):
     
     return render(request, 'food/signin.html')
 
-# Signup view
 def signup_view(request):
     if request.user.is_authenticated:
         return redirect('index')
@@ -189,7 +501,6 @@ def signup_view(request):
         password = request.POST.get('password', '').strip()
         confirm_password = request.POST.get('confirm_password', '').strip()
 
-        # Validation
         if not username or not email or not password:
             messages.error(request, "All fields are required")
             return redirect('signup')
@@ -220,7 +531,6 @@ def signup_view(request):
 
     return render(request, 'food/signup.html')
 
-# Signout view
 @login_required
 def signout_view(request):
     logout(request)
